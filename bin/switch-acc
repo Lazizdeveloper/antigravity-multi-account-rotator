@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Antigravity Multi-Account Switcher CLI
+# ==============================================================================
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Check if nix-shell is used (e.g. NixOS) or standard Python
+if command -v nix-shell >/dev/null 2>&1; then
+    exec nix-shell -p python3Packages.secretstorage --run "python3 \"$DIR/src/account_manager.py\" $*"
+else
+    exec python3 "$DIR/src/account_manager.py" "$@"
+fi

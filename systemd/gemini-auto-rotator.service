@@ -1,0 +1,14 @@
+[Unit]
+Description=Gemini Pro Automatic Multi-Account Quota Rotator
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'if command -v nix-shell >/dev/null 2>&1; then exec nix-shell -p python3Packages.secretstorage libnotify --run "python3 %h/.gemini/accounts/auto_rotator.py"; else exec python3 %h/.gemini/accounts/auto_rotator.py; fi'
+Restart=always
+RestartSec=5
+StandardOutput=append:%h/.gemini/accounts/rotator.log
+StandardError=append:%h/.gemini/accounts/rotator.log
+
+[Install]
+WantedBy=default.target

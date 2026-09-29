@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+
+# Real Antigravity CLI binary
+REAL_AGY="/home/laziz/.local/bin/agy-real"
+
+# Shared restart flag directory
+RESTART_DIR="/tmp/agy_auto_rotate"
+mkdir -p "$RESTART_DIR"
+
+# Bypass wrapper for internal daemon, flags, or non-interactive subcommands
+for arg in "$@"; do
+    case "$arg" in
+        --version|-v|--help|-h|--hub|auth|login|-p)
+            exec "$REAL_AGY" "$@"
+            ;;
+    esac
+done
+
+WRAPPER_PID=$$
+export AGY_WRAPPER_PID=$WRAPPER_PID
+touch "$RESTART_DIR/active_$WRAPPER_PID"
+
+ARGS=("$@")
+
+cleanup() {
+    rm -f "$RESTART_DIR/active_$WRAPPER_PID" "$RESTART_DIR/restart_$WRAPPER_PID"
+}
+trap cleanup EXIT INT TERM
+
+RESTART_COUNT=0
+LAST_RESTART_TIME=0
+
+while true; do
+    # Run the real binary in foreground
+    "$REAL_AGY" "${ARGS[@]}"
+    EXIT_CODE=$?
+    
+    FLAG="$RESTART_DIR/restart_$WRAPPER_PID"
+    if [ -f "$FLAG" ]; then
+        rm -f "$FLAG"
+        
+        NOW=$(date +%s)
+        if [ $((NOW - LAST_RESTART_TIME)) -lt 60 ]; then
+            RESTART_COUNT=$((RESTART_COUNT + 1))
+        else
+            RESTART_COUNT=1
+        fi
+        LAST_RESTART_TIME=$NOW
+        
+        if [ $RESTART_COUNT -gt 5 ]; then
+            echo ""
+            echo "⚠️ [Auto-Rotator] Ketma-ket 5 marta limitga uchradi."
+            echo "⏳ Barcha hisoblarda limit tugagan bo'lishi mumkin. Iltimos, birozdan so'ng 'agy -c' qilib ko'ring."
+            echo ""
+            exit 1
+        fi
+        
+        echo ""
+        echo "=========================================================================="
+        echo "🔄 [Auto-Rotator] Kvota limiti tugadi. Yangi hisob avtomatik faollashtirildi!"
+        echo "🚀 Sessiya yangi hisob bilan davom ettirilmoqda (agy -c)..."
+        echo "=========================================================================="
+        echo ""
+        
+        # Ensure -c flag is present to continue the conversation
+        HAS_C=0
+        for a in "${ARGS[@]}"; do
+            if [ "$a" = "-c" ] || [ "$a" = "--continue" ]; then
+                HAS_C=1
+                break
+            fi
+        done
+        if [ $HAS_C -eq 0 ]; then
+            ARGS+=("-c")
+        fi
+        
+        sleep 0.5
+        continue
+    fi
+    
+    # Normal exit (user pressed Ctrl+C or exited cleanly)
+    exit $EXIT_CODE
+done

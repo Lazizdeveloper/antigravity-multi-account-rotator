@@ -1,0 +1,9 @@
+{
+  "token": {
+    "access_token": "ya29.a0AfH6SM...",
+    "token_type": "Bearer",
+    "refresh_token": "1//04...",
+    "expiry": "2026-09-30T12:00:00.000000Z"
+  },
+  "id_token": "eyJhbGciOiJSUzI1NiIs..."
+}

@@ -1,0 +1,20 @@
+# Credentials and Tokens (NEVER commit live OAuth tokens)
+*.json
+!accounts.example.json
+*.txt
+*.secret
+*.token
+.secrets/
+
+# Logs & Temporary files
+*.log
+*.pid
+__pycache__/
+*.py[cod]
+*$py.class
+/tmp/
+
+# OS and IDE files
+.DS_Store
+.vscode/
+.idea/
