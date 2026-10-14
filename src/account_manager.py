@@ -17,6 +17,7 @@ except ImportError:
 
 ACCOUNTS_DIR = os.path.expanduser("~/.gemini/accounts")
 QUOTAS_CACHE_FILE = os.path.join(ACCOUNTS_DIR, "quotas.json")
+ACTIVE_ACC_FILE = os.path.join(ACCOUNTS_DIR, "active_account.txt")
 
 def get_oauth_credentials():
     """Google Antigravity OAuth client credentials dinamik olish."""
@@ -146,7 +147,7 @@ def refresh_token_if_needed(account_path):
     return data
 
 def get_accounts():
-    files = sorted([f for f in os.listdir(ACCOUNTS_DIR) if f.endswith(".json") and f != "quotas.json"])
+    files = sorted([f for f in os.listdir(ACCOUNTS_DIR) if f.endswith(".json") and f not in ("quotas.json", "client.json")])
     accounts = []
     for f in files:
         email = f.replace(".json", "")
@@ -243,20 +244,94 @@ def make_bar(pct, width=10):
     filled = int(round(width * (pct / 100.0)))
     return '[' + '█' * filled + '░' * (width - filled) + f'] {pct:>3}%'
 
+def parse_iso_time(iso_str):
+    if not iso_str or not str(iso_str).strip():
+        return None
+    try:
+        from datetime import datetime
+        clean = str(iso_str).strip()
+        if clean.endswith("Z"):
+            return datetime.fromisoformat(clean[:-1] + "+00:00")
+        return datetime.fromisoformat(clean)
+    except Exception:
+        return None
+
+def format_5hour_reset(data):
+    fiveh_pct = data.get("gemini_5hour_pct", 0)
+    weekly_pct = data.get("gemini_weekly_pct", 0)
+    reset_iso = data.get("gemini_5hour_reset", "")
+    weekly_reset_iso = data.get("gemini_weekly_reset", "")
+    now_ts = time.time()
+
+    # 1. Agar haftalik limit tugagan bo'lib, haftalik reset vaqti bo'lsa
+    if weekly_pct <= 5 and weekly_reset_iso:
+        dt_utc = parse_iso_time(weekly_reset_iso)
+        if dt_utc:
+            diff_sec = dt_utc.timestamp() - now_ts
+            dt_local = dt_utc.astimezone()
+            time_str = dt_local.strftime("%H:%M")
+
+            if diff_sec <= 0:
+                return f"Tiklandi ({time_str})"
+
+            diff_min = int(round(diff_sec / 60))
+            if diff_min < 1:
+                return f"<1 daq ({time_str})"
+            elif diff_min < 60:
+                return f"{diff_min} daq ({time_str})"
+            elif diff_min < 1440:
+                h = diff_min // 60
+                return f"{diff_min} daq ({h}s, {time_str})"
+            else:
+                days = diff_min // 1440
+                date_str = dt_local.strftime("%d.%m")
+                return f"{days} kun ({date_str})"
+
+    # 2. 5-soatlik to'liq bo'lsa
+    if fiveh_pct >= 100:
+        return "To'liq (100%)"
+
+    # 3. 5-soatlik tiklanish vaqti mavjud bo'lsa
+    if reset_iso:
+        dt_utc = parse_iso_time(reset_iso)
+        if dt_utc:
+            diff_sec = dt_utc.timestamp() - now_ts
+            dt_local = dt_utc.astimezone()
+            time_str = dt_local.strftime("%H:%M")
+
+            if diff_sec <= 0:
+                return f"Tiklandi ({time_str})"
+
+            diff_min = int(round(diff_sec / 60))
+            if diff_min < 1:
+                return f"<1 daq ({time_str})"
+            elif diff_min < 60:
+                return f"{diff_min} daq ({time_str})"
+            else:
+                h = diff_min // 60
+                return f"{diff_min} daq ({h}s, {time_str})"
+
+    if fiveh_pct == 0 and weekly_pct <= 0:
+        return "Haftalik 0%"
+    elif fiveh_pct == 0:
+        return "~5 soat ichida"
+    return "—"
+
 def show_usage(force_refresh=False):
     cache = load_quotas(force_refresh=force_refresh)
     if not cache or "accounts" not in cache:
         print("Xatolik: Kvota ma'lumotlarini yuklab bo'lmadi.")
         return
 
-    current_email = get_current_email()
+    current_email = get_intended_active_email() or get_current_email()
     accounts = get_accounts()
 
-    print("=" * 88)
+    print("=" * 118)
     print("🤖 GEMINI PRO MULTI-ACCOUNT KVOTA VA LIMITLAR HOLATI")
-    print("=" * 88)
-    print(" # | Hisob (Google Account)       | Haftalik (Weekly) | 5-Soatlik Limit  | Holati")
-    print("-" * 88)
+    print("=" * 118)
+    col1, col2, col3, col4 = "Hisob (Google Account)", "Haftalik (Weekly)", "5-Soatlik Limit", "Tiklanish (Reset)"
+    print(f" # | {col1:<28} | {col2:<17} | {col3:<16} | {col4:<21} | Holati")
+    print("-" * 118)
 
     usable_count = 0
     total_count = len(accounts)
@@ -272,22 +347,23 @@ def show_usage(force_refresh=False):
 
         w_bar = make_bar(weekly_pct, 10)
         f_bar = make_bar(fiveh_pct, 10)
+        reset_str = format_5hour_reset(data)
 
         if fiveh_pct > 0 and weekly_pct > 5:
             usable_count += 1
 
         if is_active:
             status = "🟢 FAOL (Ishlatilmoqda)"
-        elif fiveh_pct == 0:
-            status = "⏳ 5-soatlik tugagan"
         elif weekly_pct <= 5:
             status = "⚠️ Haftalik limit tugagan"
+        elif fiveh_pct == 0:
+            status = "⏳ 5-soatlik tugagan"
         else:
             status = "✅ Foydalanishga tayyor"
 
-        print(f"{prefix:>2} | {email:<28} | {w_bar:<17} | {f_bar:<16} | {status}")
+        print(f"{prefix:>2} | {email:<28} | {w_bar:<17} | {f_bar:<16} | {reset_str:<21} | {status}")
 
-    print("=" * 88)
+    print("=" * 118)
     age_sec = int(time.time() - cache.get("updated_at", time.time()))
     if age_sec < 60:
         age_str = f"{age_sec} soniya oldin"
@@ -296,10 +372,10 @@ def show_usage(force_refresh=False):
 
     print(f"💡 Mavjud tayyor hisoblar: {usable_count}/{total_count} ta  |  Ma'lumot yangiligi: {age_str}")
     print("🔄 Jonli yangilash: switch-acc usage -r  |  Almashtirish: switch-acc <raqam>")
-    print("=" * 88)
+    print("=" * 118)
 
 def list_accounts():
-    current_email = get_current_email()
+    current_email = get_intended_active_email() or get_current_email()
     accounts = get_accounts()
     print("=" * 55)
     print("🤖 ANTIGRAVITY MULTI-ACCOUNT MANAGER (Gemini Pro)")
@@ -314,6 +390,8 @@ def list_accounts():
     print("  switch-acc usage        — Barcha hisoblar kvotasini ko'rish")
     print("  switch-acc <raqam>      — Masalan: switch-acc 2")
     print("  switch-acc next         — Eng qulay navbatdagi hisobga o'tish")
+    print("  switch-acc add          — Yangi hisob qo'shish (kuzatuv rejimi)")
+    print("  switch-acc save         — Hozirgi login qilingan hisobni saqlash")
     print("=" * 55)
 
 def smart_pick_next_account(accounts, current_email):
@@ -418,6 +496,76 @@ def switch_to_account(target_selector):
 
     return True
 
+def save_current_account():
+    item = get_keyring_item()
+    if not item:
+        print("Xatolik: Tizim kalitlar omborida (keyring) faol Antigravity hisobi topilmadi.")
+        return None
+    try:
+        raw = item.get_secret().decode("utf-8")
+        data = json.loads(raw)
+        id_token = data.get("id_token", "")
+        if not id_token:
+            print("Xatolik: Token ichida id_token topilmadi.")
+            return None
+        payload_b64 = id_token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.b64decode(payload_b64))
+        email = payload.get("email")
+        if not email:
+            print("Xatolik: Token ichidan email topilmadi.")
+            return None
+        target = os.path.join(ACCOUNTS_DIR, f"{email}.json")
+        with open(target, "w") as f:
+            f.write(raw)
+        print(f"✅ Yangi hisob muvaffaqiyatli saqlandi: {email}")
+        return email
+    except Exception as e:
+        print(f"Hisobni saqlashda xatolik: {e}")
+        return None
+
+def watch_and_add_accounts():
+    print("=" * 70)
+    print("🤖 GEMINI PRO: YANGI HISOBLARNI BAZAGA QO'SHISH (WATCHER)")
+    print("=" * 70)
+    print("Ko'rsatma:")
+    print("  1. Boshqa terminal ochib 'agy' ga kiring.")
+    print("  2. U yerda '/logout' buyrug'ini bering.")
+    print("  3. Brauzerda yangi sotib olingan Google hisobingiz bilan tizimga kiring.")
+    print("  4. Ushbu dastur yangi hisobni avtomatik aniqlab bazaga qo'shadi.")
+    print("=" * 70)
+    existing_accounts = {a["email"] for a in get_accounts()}
+    print(f"📌 Hozirda bazadagi hisoblar soni: {len(existing_accounts)} ta:")
+    for idx, em in enumerate(sorted(existing_accounts), 1):
+        print(f"   {idx}. {em}")
+    print("\n⏳ Yangi hisob kutilmoqda (to'xtatish uchun Ctrl+C bosing)...\n")
+    try:
+        while True:
+            item = get_keyring_item()
+            if item:
+                try:
+                    raw = item.get_secret().decode("utf-8")
+                    data = json.loads(raw)
+                    id_token = data.get("id_token", "")
+                    if id_token:
+                        payload_b64 = id_token.split(".")[1]
+                        payload_b64 += "=" * (-len(payload_b64) % 4)
+                        payload = json.loads(base64.b64decode(payload_b64))
+                        email = payload.get("email")
+                        if email and email not in existing_accounts:
+                            target = os.path.join(ACCOUNTS_DIR, f"{email}.json")
+                            with open(target, "w") as f:
+                                f.write(raw)
+                            existing_accounts.add(email)
+                            print(f"🎉 YANGI HISOBLAR SAQLANDI: {email}!")
+                            print(f"🚀 Jami hisoblar soni: {len(existing_accounts)} ta bo'ldi.")
+                            print("➡️ Agar yana bitta hisob qo'shmoqchi bo'lsangiz, yana /logout qilib keyingisiga kiring...")
+                except Exception:
+                    pass
+            time.sleep(2)
+    except KeyboardInterrupt:
+        print("\n\n⏹️ Kuzatuv yakunlandi.")
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     if not args:
@@ -431,5 +579,9 @@ if __name__ == "__main__":
             list_accounts()
         elif cmd in ("refresh", "-r", "--refresh"):
             show_usage(force_refresh=True)
+        elif cmd in ("add", "watch", "--add"):
+            watch_and_add_accounts()
+        elif cmd in ("save", "--save"):
+            save_current_account()
         else:
             switch_to_account(cmd)

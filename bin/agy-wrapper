@@ -47,9 +47,11 @@ while true; do
         fi
         LAST_RESTART_TIME=$NOW
         
-        if [ $RESTART_COUNT -gt 5 ]; then
+        ACC_COUNT=$(find /home/laziz/.gemini/accounts/ -maxdepth 1 -name "*.json" ! -name "quotas.json" ! -name "client.json" 2>/dev/null | wc -l)
+        MAX_RETRY=${ACC_COUNT:-5}
+        if [ $RESTART_COUNT -gt $MAX_RETRY ]; then
             echo ""
-            echo "⚠️ [Auto-Rotator] Ketma-ket 5 marta limitga uchradi."
+            echo "⚠️ [Auto-Rotator] Ketma-ket $MAX_RETRY marta limitga uchradi."
             echo "⏳ Barcha hisoblarda limit tugagan bo'lishi mumkin. Iltimos, birozdan so'ng 'agy -c' qilib ko'ring."
             echo ""
             exit 1
@@ -58,21 +60,43 @@ while true; do
         echo ""
         echo "=========================================================================="
         echo "🔄 [Auto-Rotator] Kvota limiti tugadi. Yangi hisob avtomatik faollashtirildi!"
-        echo "🚀 Sessiya yangi hisob bilan davom ettirilmoqda (agy -c)..."
+        echo "🚀 Sessiya yangi hisob bilan avtomatik davom ettirilmoqda..."
         echo "=========================================================================="
         echo ""
         
+        # Build clean args for automatic continuation
+        NEW_ARGS=()
+        SKIP_NEXT=0
+        for a in "${ARGS[@]}"; do
+            if [ $SKIP_NEXT -eq 1 ]; then
+                SKIP_NEXT=0
+                continue
+            fi
+            if [ "$a" = "-i" ] || [ "$a" = "--prompt-interactive" ]; then
+                SKIP_NEXT=1
+                continue
+            fi
+            if [[ "$a" =~ ^--prompt-interactive= ]]; then
+                continue
+            fi
+            NEW_ARGS+=("$a")
+        done
+        
         # Ensure -c flag is present to continue the conversation
         HAS_C=0
-        for a in "${ARGS[@]}"; do
+        for a in "${NEW_ARGS[@]}"; do
             if [ "$a" = "-c" ] || [ "$a" = "--continue" ]; then
                 HAS_C=1
                 break
             fi
         done
         if [ $HAS_C -eq 0 ]; then
-            ARGS+=("-c")
+            NEW_ARGS+=("-c")
         fi
+        
+        # Auto-continue prompt: user doesn't need to manually type 'davom et'
+        NEW_ARGS+=("-i" "davom et")
+        ARGS=("${NEW_ARGS[@]}")
         
         sleep 0.5
         continue
